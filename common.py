@@ -7,8 +7,8 @@ SESSIONS = ["pre", "post"]
 
 
 def get_path_root() -> Path:
-    # return Path(r"C:\Users\dominik.fohrmann\OneDrive - MSH Medical School Hamburg - University of Applied Sciences and Medical University\Dokumente\Projects\AFT_Habituation_2\data")
-    return Path(r"E:\projects\AFT_Habituation_2\data")
+    return Path(r"C:\Users\dominik.fohrmann\OneDrive - MSH Medical School Hamburg - University of Applied Sciences and Medical University\Dokumente\Projects\AFT_Habituation_2\data")
+    # return Path(r"E:\projects\AFT_Habituation_2\data")
 
 
 def get_demographics() -> pd.DataFrame:

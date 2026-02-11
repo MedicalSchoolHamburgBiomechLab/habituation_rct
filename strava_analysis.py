@@ -1,3 +1,5 @@
+import datetime
+
 from matplotlib.dates import AutoDateLocator, ConciseDateFormatter
 import numpy as np
 
@@ -112,7 +114,8 @@ def get_pre_post_dates(participant_id: str) -> (pd.Timestamp, pd.Timestamp):
         raise ValueError(f"Missing session dates for participant {participant_id}")
     if pd.isna(end_date):
         # TODO: FOR NOW!!! REMOVE WHEN DATA IS COMPLETE
-        end_date = start_date + pd.Timedelta(weeks=12)
+        # end_date = start_date + pd.Timedelta(weeks=12)
+        raise ValueError(f"Missing session dates for participant {participant_id}")
     # check that diff between start and end date is at least 8 weeks
     full_weeks = int((end_date - start_date) / np.timedelta64(1, 'W'))
     if full_weeks < 8:
@@ -203,21 +206,50 @@ def main(participant_id: str = None):
             continue
         df_strava = pd.read_excel(strava_files[0])
         start_date, end_date = get_pre_post_dates(participant_id)
-        df_strava = cut_to_study_period(df_strava, start_date, end_date)
-        running_km_total = get_total_running_distance(df_strava)
-        running_km_intervention = get_running_distance_in_msh_footwear(df_strava)
-        df_running_total_weekly = get_total_running_distance_per_week(df_strava, start_date=start_date)
-        df_running_intervention_weekly = get_intervention_shoe_running_distance_per_week(df_strava, start_date=start_date)
-        # combine both weekly dataframes
-        df_running_weekly = pd.merge(df_running_total_weekly, df_running_intervention_weekly, on='week_start', how='outer', suffixes=('_total', '_intervention'))
-        # add percentage in intervention shoe column
-        df_running_weekly['percentage_intervention'] = (df_running_weekly['distance_km_intervention'] / df_running_weekly['distance_km_total']) * 100
-        # safe to excel
-        filename_out = f"{participant_id}_running_summary.xlsx"
-        path_out = get_path_strava_root() / "summary"
+        #
+        #
+        # Make a new excel sheet per participant, containing only runs from 12 weeks prior to study start data until study end date
+        #
+        #
+        df_runs_only = get_runs_only(df_strava)
+        if len(df_runs_only) == 0:
+            print(f"No running activities found for participant {participant_id}")
+            continue
+        pre_study_check_date = start_date - pd.Timedelta(weeks=12)
+        df_reduced = cut_to_study_period(df_runs_only, pre_study_check_date, end_date)
+        columns = ['start_date_local', 'name', 'distance', 'moving_time', 'type', 'gear_model_name']
+        df_reduced = df_reduced[columns].copy()
+        # add the absolute week number (always starting on monday) to the dataframe, relative to the study start date (study start date week is week 1)
+        df_reduced['week_number'] = ((df_reduced['start_date_local'] - start_date) / np.timedelta64(1, 'W')).apply(np.ceil).astype(int)
+        # add a column indicating whether the run was done in the intervention shoe
+        df_reduced['in_intervention_shoe'] = df_reduced['gear_model_name'].str.contains('MSH', na=False)
+        # save to excel
+        filename_out = f"{participant_id}_runs_study_period.xlsx"
+        path_out = get_path_strava_root() / "runs_only"
         path_out.mkdir(parents=True, exist_ok=True)
-        df_running_weekly.to_excel(path_out / filename_out, index=False)
-        plot_intervention_percentage(df_running_weekly, participant_id, path_out)
+        df_reduced.to_excel(path_out / filename_out, index=False)
+
+        #
+        #
+        #
+        #
+
+        # df_strava = cut_to_study_period(df_strava, start_date, end_date)
+        # running_km_total = get_total_running_distance(df_strava)
+        # running_km_intervention = get_running_distance_in_msh_footwear(df_strava)
+        # df_running_total_weekly = get_total_running_distance_per_week(df_strava, start_date=start_date)
+        # df_running_intervention_weekly = get_intervention_shoe_running_distance_per_week(df_strava, start_date=start_date)
+        # # combine both weekly dataframes
+        # df_running_weekly = pd.merge(df_running_total_weekly, df_running_intervention_weekly, on='week_start', how='outer', suffixes=('_total', '_intervention'))
+        # # add percentage in intervention shoe column
+        # df_running_weekly['percentage_intervention'] = (df_running_weekly['distance_km_intervention'] / df_running_weekly['distance_km_total']) * 100
+        # # safe to excel
+        # filename_out = f"{participant_id}_running_summary.xlsx"
+        # path_out = get_path_strava_root() / "summary"
+        # path_out.mkdir(parents=True, exist_ok=True)
+        # df_running_weekly.to_excel(path_out / filename_out, index=False)
+        # plot_intervention_percentage(df_running_weekly, participant_id, path_out)
+
 
 # todo:
 # 1. Get the total mileage in the intervention shoe per participant during the study period (12w)
@@ -227,7 +259,92 @@ def main(participant_id: str = None):
 # 5. Get the nuber of weeks where at least one run was done in the intervention shoe
 # 6. Get the total number of days of the study period per participant
 
+
+def data_reduction():
+    path_strava_raw = get_path_strava_raw()
+    p_ids = PARTICIPANT_IDS
+    for participant_id in p_ids:
+        path_participant = path_strava_raw / participant_id
+        if not path_participant.exists():
+            warnings.warn(f"Participant path does not exist: {path_participant}")
+            continue
+        strava_files = list(path_participant.glob("*.xlsx"))
+        if len(strava_files) != 1:
+            print(f"Expected one strava file for {participant_id}, found {len(strava_files)}")
+            continue
+        df_strava = pd.read_excel(strava_files[0])
+        try:
+            start_date, end_date = get_pre_post_dates(participant_id)
+        except ValueError as e:
+            print(f"Error getting session dates for participant {participant_id}: {e}")
+            continue
+        #
+        #
+        # Make a new excel sheet per participant, containing only runs from 12 weeks prior to study start data until study end date
+        #
+        #
+        df_runs_only = get_runs_only(df_strava)
+        if len(df_runs_only) == 0:
+            print(f"No running activities found for participant {participant_id}")
+            continue
+        pre_study_check_date = start_date - pd.Timedelta(weeks=12)
+        df_reduced = cut_to_study_period(df_runs_only, pre_study_check_date, end_date)
+        columns = ['start_date_local', 'name', 'distance', 'moving_time', 'type', 'gear_model_name']
+        df_reduced = df_reduced[columns].copy()
+        # add the absolute week number (always starting on monday) to the dataframe, relative to the study start date (study start date week is week 1)
+        df_reduced['week_number'] = ((df_reduced['start_date_local'] - start_date) / np.timedelta64(1, 'W')).apply(np.ceil).astype(int)
+        # add a column indicating whether the run was done in the intervention shoe
+        df_reduced['in_intervention_shoe'] = df_reduced['gear_model_name'].str.contains('MSH', na=False)
+        # save to excel
+        filename_out = f"{participant_id}_runs_study_period.xlsx"
+        path_out = get_path_strava_root() / "runs_only"
+        path_out.mkdir(parents=True, exist_ok=True)
+        df_reduced.to_excel(path_out / filename_out, index=False)
+    return
+
+
+def check_pre_study_data():
+    path_root = get_path_root()
+    path_data = path_root / "strava" / "runs_only"
+    p_ids = PARTICIPANT_IDS
+    df_out = pd.DataFrame(columns=['participant_id', 'days_pre_study', 'days_study', 'diff', 'mileage_pre_study_km', 'mileage_study_km', 'ratio'])
+    for participant_id in p_ids:
+        print(f"Checking pre-study data for participant {participant_id}...")
+        path_participant = path_data / f"{participant_id}_runs_study_period.xlsx"
+        if not path_participant.exists():
+            warnings.warn(f"Participant file does not exist: {path_participant}")
+            continue
+        df_strava = pd.read_excel(path_participant)
+
+        try:
+            start_date, end_date = get_pre_post_dates(participant_id)
+        except ValueError as e:
+            print(f"Error getting session dates for participant {participant_id}: {e}")
+            continue
+        pre_study_check_date = start_date - pd.Timedelta(weeks=12)
+        df_pre_study_period = cut_to_study_period(df_strava, pre_study_check_date, start_date - pd.Timedelta(days=1))
+        df_study_period = cut_to_study_period(df_strava,  start_date, end_date)
+        days_pre_study = (start_date - pre_study_check_date).days
+        days_study = int((end_date - start_date).astype('timedelta64[D]') / np.timedelta64(1, 'D'))
+
+        mileage_pre_study = df_pre_study_period['distance'].sum() / 1000
+        mileage_study = df_study_period['distance'].sum() / 1000
+        data = {'participant_id': participant_id,
+                                'days_pre_study': days_pre_study,
+                                'days_study': days_study,
+                                'diff': days_study - days_pre_study,
+                                'mileage_pre_study_km': mileage_pre_study,
+                                'mileage_study_km': mileage_study,
+                                'ratio': mileage_study / mileage_pre_study if mileage_pre_study > 0 else np.nan
+                }
+
+        df_add = pd.DataFrame(data, index=[0])
+        df_out = pd.concat([df_out, df_add], ignore_index=True)
+    df_out.to_excel(path_root / "strava" / "pre_study_data_check.xlsx", index=False)
+
+
 if __name__ == '__main__':
-    main(participant_id="HAB10")
+    # main(participant_id="HAB10")
+    # data_reduction()
     # main()
- 
+    check_pre_study_data()
