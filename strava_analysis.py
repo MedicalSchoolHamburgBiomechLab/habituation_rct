@@ -219,7 +219,15 @@ def main(participant_id: str = None):
         df_running_weekly.to_excel(path_out / filename_out, index=False)
         plot_intervention_percentage(df_running_weekly, participant_id, path_out)
 
+# todo:
+# 1. Get the total mileage in the intervention shoe per participant during the study period (12w)
+# 2. Get the overall average weekly running mileage during the 12 weeks prior to the study start date and compare to the weekly mileage during the study period
+# 3. Get the total overall adherence to the intervention shoe as percentage of total running distance
+# 4. Adherence: percentage of running distance in the intervention shoe over the total running distance during the study period
+# 5. Get the nuber of weeks where at least one run was done in the intervention shoe
+# 6. Get the total number of days of the study period per participant
 
 if __name__ == '__main__':
-    main(participant_id="HAB17")
+    main(participant_id="HAB10")
     # main()
+ 
