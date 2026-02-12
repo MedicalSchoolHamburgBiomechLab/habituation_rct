@@ -14,6 +14,7 @@ def analyze_file(data, meta, participant_id, session, path_plots=None) -> dict:
     # Placeholder for analysis logic
     meta_id = meta["Nachname"]
     if meta_id != participant_id:
+        warnings.warn(f"Meta participant ID '{meta_id}' does not match expected ID '{participant_id}' for session '{session}'. Skipping analysis for this file.")
         return dict()
     # rename necessary columns
     wrong_column_names = ["VO2/kg (mL/min/Kg)", "VO2/Kg (mL/min/Kg)"]
@@ -122,11 +123,20 @@ def get_path_spiro_results():
     return get_spiro_path_root() / "results_spiro.xlsx"
 
 
+def get_path_spiro_plots():
+    path_spiro_root = get_spiro_path_root()
+    path_plots = path_spiro_root / "plots"
+    path_plots.mkdir(parents=True, exist_ok=True)
+    return path_plots
+
+
 def add_shoe_condition(df: pd.DataFrame) -> pd.DataFrame:
     if 'shoe_condition' in df.columns:
         df.drop(columns='shoe_condition', inplace=True, axis=1)
     if 'shoe_condition_long' in df.columns:
         df.drop(columns='shoe_condition_long', inplace=True, axis=1)
+    if 'int_group' in df.columns:
+        df.drop(columns='int_group', inplace=True, axis=1)
     path_data_root = get_path_root()
     # The correct shoe order is actually in "borg_lactate.xlsx"
     path_shoe_order_pre = path_data_root / "borg_lactate.xlsx"
@@ -139,6 +149,21 @@ def add_shoe_condition(df: pd.DataFrame) -> pd.DataFrame:
     df_shoe_order = pd.concat([df_shoe_order_pre, df_shoe_order_post], ignore_index=True)
     # merge columns shoe_condition and is_aft into one
     df_shoe_order['is_aft'] = df_shoe_order['is_aft'].astype(bool)
+    # Get mapping of participant_id to int_group
+    df_sub = df_shoe_order[df_shoe_order['shoe_condition'] == 'INT']
+    df_sub = df_sub.groupby('participant_id')['is_aft'].first().reset_index()
+    df_shoe_order['int_group'] = df_shoe_order['participant_id'].map(
+        df_sub.set_index('participant_id')['is_aft'].to_dict()
+    )
+    df_shoe_order['int_group'] = df_shoe_order['int_group'].map({True: 'AFT', False: 'NonAFT'})
+
+    # create new column shoe_condition_long based on shoe_condition and is_aft
+    # AFT -> AFT
+    # NonAFT -> NonAFT
+    # INT + is_aft True -> INT (AFT)
+    # INT + is_aft False -> INT (Non AFT)
+    #
+
     def add_shoe_condition_long(row):
         if row['shoe_condition'] == "AFT":
             return "AFT"
@@ -150,6 +175,7 @@ def add_shoe_condition(df: pd.DataFrame) -> pd.DataFrame:
             return "INT (Non AFT)"
         else:
             return row['shoe_condition']
+
     df_shoe_order['shoe_condition_long'] = df_shoe_order.apply(add_shoe_condition_long, axis=1)
 
     # df_long = (df_shoe_order_pre.melt(id_vars='participant_id', var_name='trial_no', value_name='shoe_condition')
@@ -165,7 +191,7 @@ def add_shoe_condition(df: pd.DataFrame) -> pd.DataFrame:
     df_merged = pd.merge(df, df_shoe_order, on=['participant_id', 'session', 'trial_no'], how='inner')
     # df_merged["participant_id"].value_counts().max().nunique()
     # reorder:
-    df_merged = df_merged[['participant_id', 'session', 'trial_no', 'shoe_condition', 'shoe_condition_long', 'avg_vo2kg', 'avg_vco2kg']]
+    df_merged = df_merged[['participant_id', 'int_group', 'session', 'trial_no', 'shoe_condition', 'shoe_condition_long', 'avg_vo2kg', 'avg_vco2kg']]
     # df_merged = df_merged.rename(columns={"shoe": "shoe_condition"})
     return df_merged
 
@@ -201,7 +227,8 @@ def calc_spiro_metrics() -> pd.DataFrame:
         except Exception as e:
             warnings.warn(f"Could not read {spiro_file}: {e}")
             continue
-        values_dict = analyze_file(data, meta, participant_id, session)  # , path_plots=path_plots)
+        # values_dict = analyze_file(data, meta, participant_id, session)  # , path_plots=path_plots)
+        values_dict = analyze_file(data, meta, participant_id, session, path_plots=path_plots)
         if not values_dict:
             warnings.warn(f"No values returned from analyze_file for {participant_id} {session}. Possibly wrong ID?")
 
@@ -214,14 +241,12 @@ def calc_spiro_metrics() -> pd.DataFrame:
     return df_out
 
 
-
-
 def get_demographics():
     path_data_root = get_path_root()
     path_demographics = path_data_root / "demographics_session_info.xlsx"
     df_demo = pd.read_excel(path_demographics, nrows=70)
 
-    df_out = df_demo[['participant_id', 'sex', 'DOB']]
+    df_out = df_demo[['participant_id', 'sex', 'DOB', 'height_cm', 'weight_kg', 'age']].copy()
     df_out['sex'][df_out['sex'] == "w"] = 'f'  # recode 'w' to 'f'
     # add running speed column based on sex column
     df_out["speed"] = df_demo["sex"].map({"f": 12.0, "m": 14.0, "w": 12.0})
@@ -246,6 +271,26 @@ def add_running_economy(df_spiro, df_demo) -> pd.DataFrame:
     return df_eco
 
 
+def remove_dropouts(df):
+    # remove dropouts based on the list of dropouts
+    dropout_ids = ['HAB01', 'HAB02', 'HAB29', 'HAB31', 'HAB35', 'HAB46', 'HAB57', 'HAB62', 'HAB65', 'HAB68']
+    df_filtered = df[~df['participant_id'].isin(dropout_ids)]
+    return df_filtered
+
+
+def remove_skewed_trials(df):
+    # remove trials where visual check showed inconsistent or skewed data (e.g. due to technical issues during measurement)
+    # list of tuples with participant_id, session, trial_no to remove
+    trials_to_remove = [
+        ('HAB22', 'PRE', 6, 'bout was interrupted due to lace coming undone'),
+    ]
+
+    for participant_id, session, trial_no, reason in trials_to_remove:
+        print(f"Removing trial for participant {participant_id}, session {session}, trial {trial_no} due to: {reason}")
+        df = df[~((df['participant_id'] == participant_id) & (df['session'] == session) & (df['trial_no'] == trial_no))]
+    return df
+
+
 if __name__ == '__main__':
     RECALC = False
     if RECALC:
@@ -253,8 +298,13 @@ if __name__ == '__main__':
         safe_path_spiro_results(df_spiro)
     else:
         df_spiro = load_df_spiro()
+    # count rows per participant_id and session
+    counts = df_spiro.groupby(['participant_id', 'session']).size()
+    counts_per_participant = counts.groupby('participant_id').sum()
+
     df_spiro = add_shoe_condition(df_spiro)
-    # safe_path_spiro_results(df_merged)
     df_demographics = get_demographics()
     df_spiro = add_running_economy(df_spiro, df_demographics)
+    df_spiro = remove_dropouts(df_spiro)
+    df_spiro = remove_skewed_trials(df_spiro)
     safe_path_spiro_results(df_spiro)
