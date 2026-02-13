@@ -113,9 +113,10 @@ def get_pre_post_dates(participant_id: str) -> (pd.Timestamp, pd.Timestamp):
     if pd.isna(start_date):
         raise ValueError(f"Missing session dates for participant {participant_id}")
     if pd.isna(end_date):
-        # TODO: FOR NOW!!! REMOVE WHEN DATA IS COMPLETE
-        # end_date = start_date + pd.Timedelta(weeks=12)
-        raise ValueError(f"Missing session dates for participant {participant_id}")
+        end_date = start_date + np.timedelta64(12, 'W')  # assume 12 weeks later if POST date is missing, but warn about it
+
+
+        warnings.warn(f"Missing session dates for participant {participant_id}")
     # check that diff between start and end date is at least 8 weeks
     full_weeks = int((end_date - start_date) / np.timedelta64(1, 'W'))
     if full_weeks < 8:
@@ -345,6 +346,6 @@ def check_pre_study_data():
 
 if __name__ == '__main__':
     # main(participant_id="HAB10")
-    # data_reduction()
+    data_reduction()
     # main()
-    check_pre_study_data()
+    # check_pre_study_data()
