@@ -56,11 +56,11 @@ def get_activities_period_days(df_all: pd.DataFrame) -> int:
     return diff
 
 
-def make_activities_summary(path: Path) -> dict:
-    p_id = path.parent.stem
+def make_activities_summary(row: pd.Series) -> dict:
+    p_id = row.participant
     date_start, date_end = get_pre_post_dates(p_id)
     out = dict()
-    df_all = pd.read_excel(path, index_col=0)
+    df_all = pd.read_excel(row.path, index_col=0)
     df_all["date"] = pd.to_datetime(df_all['start_date_local'])
 
     date_first_activity = df_all['date'].min()
@@ -83,6 +83,8 @@ def summary(batch_processor: BatchProcessor):
     results = batch_processor.apply(make_activities_summary
                                     , multiprocess=True
                                     )
+    if len(bp.errors) > 0:
+        [print(e) for e in bp.errors]
     df_results = pd.json_normalize(results)
     df_merged = pd.concat([batch_processor.index.reset_index(drop=True), df_results], axis=1)
     df_merged.drop(columns=["path"], inplace=True)
@@ -121,7 +123,8 @@ def get_intervention_shoe_running_distance_per_week(
     return df_weekly[['week_start', 'distance_km']]
 
 
-def make_metrics(path: Path) -> dict:
+def make_metrics(row: pd.Series) -> dict:
+
     # 1. Get the total mileage in the intervention shoe per participant during the study period (12w) ✅
     # 2. Get the overall average weekly running mileage during the 12 weeks prior to the study start date and compare to the weekly mileage during the study period
     # 3. Get the total overall adherence to the intervention shoe as percentage of total running distance ✅
@@ -130,10 +133,10 @@ def make_metrics(path: Path) -> dict:
     # 6. Get the total number of days of the study period per participant ✅
 
     out = dict()
-    p_id = path.parent.stem
+    p_id = row.participant
     date_start, date_end = get_pre_post_dates(p_id)
 
-    df_all = pd.read_excel(path, index_col=0)
+    df_all = pd.read_excel(row.path, index_col=0)
     df_all["date"] = pd.to_datetime(df_all['start_date_local'])
     df_period_runs = get_runs_only(cut_to_study_period(df_all, date_start, date_end))
     df_intervention = df_period_runs[df_period_runs["gear_name"].str.contains("MSH", na=False)]
