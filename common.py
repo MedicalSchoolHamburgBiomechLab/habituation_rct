@@ -6,7 +6,13 @@ from os import getenv
 
 PARTICIPANT_IDS = [f"HAB{i:02d}" for i in range(1, 71)]
 SESSIONS = ["pre", "post"]
-DROPOUTS = ["HAB01", "HAB02", "HAB25", "HAB29", "HAB31", "HAB35", "HAB38", "HAB46", "HAB57", "HAB62", "HAB65", "HAB68"]
+DROPOUTS = ["HAB01", "HAB02", "HAB05",
+            "HAB14", "HAB15", "HAB17",
+            "HAB24", "HAB25", "HAB26", "HAB27", "HAB29",
+            "HAB31", "HAB35", "HAB37", "HAB38",
+            "HAB41", "HAB42", "HAB43", "HAB46", "HAB48",
+            "HAB51", "HAB56", "HAB57", "HAB59",
+            "HAB62", "HAB63", "HAB65", "HAB68"]
 
 
 def get_path_root() -> Path:

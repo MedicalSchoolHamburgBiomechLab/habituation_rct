@@ -1,16 +1,18 @@
-from labtools.systems.cosmed.convenience import read_cosmed_excel
-import seaborn as sns
-from pathlib import Path
+import warnings
+from itertools import product
+
 import matplotlib.pyplot as plt
 import numpy as np
-from itertools import product
-import warnings
 import pandas as pd
+import seaborn as sns
+from labtools.batch_processor import BatchProcessor
+from labtools.systems.cosmed.convenience import read_cosmed_excel
 
-from common import SESSIONS, get_path_root, PARTICIPANT_IDS
+from common import DROPOUTS, PARTICIPANT_IDS, SESSIONS, get_path_root
 
 
 def analyze_file(data, meta, participant_id, session, path_plots=None) -> dict:
+    make_plots = False if path_plots is None else True
     # Placeholder for analysis logic
     meta_id = meta["Nachname"]
     if meta_id != participant_id:
@@ -68,50 +70,72 @@ def analyze_file(data, meta, participant_id, session, path_plots=None) -> dict:
     #             bout_starts = bout_starts + (avg_bout_duration * bout_missing)
 
     # return 0
-    plt.close()
-    plt.figure(figsize=(12, 6))
-    sns.lineplot(data=data, x="t (s)", y="VO2/kg (mL/min/kg)")
+
+
     average_window_seconds = 180
     keys = ["trial_no", "avg_vo2kg", "avg_vco2kg"]
     res = {k: [] for k in keys}
+
     for it, t in enumerate(data["t (s)"][marker_end_bout_mask]):
-        plt.axvline(t, color="red", linestyle="--", alpha=0.5)
         # go back average_window_seconds and plot average
         start_time = t - average_window_seconds
-        end_time = t
         roi_vo2_rel = data.loc[(data["t (s)"] >= start_time) & (data["t (s)"] < t), "VO2/kg (mL/min/kg)"]
         roi_vco2_abs = data.loc[(data["t (s)"] >= start_time) & (data["t (s)"] < t), "VCO2 (mL/min)"]
         roi_vco2_rel = roi_vco2_abs / meta["Gewicht (kg)"]
         avg_rel_vo2 = roi_vo2_rel.mean()
         avg_rel_vco2 = roi_vco2_rel.mean()
-        plt.plot([start_time, t], [avg_rel_vo2, avg_rel_vo2], color="red", linestyle="--", alpha=0.5)
-        plt.text(t + 10, avg_rel_vo2, f"{avg_rel_vo2:.1f}", color="red", fontsize=8)
-        # add regression line and text with the slope
-        sns.regplot(x="t (s)", y="VO2/kg (mL/min/kg)", data=data.loc[(data["t (s)"] >= start_time) & (data["t (s)"] < t)], scatter=False, color="red", line_kws={"alpha": 0.5})
         time_series = data["t (s)"][(data["t (s)"] >= start_time) & (data["t (s)"] < t)]
         data_series = data["VO2/kg (mL/min/kg)"][(data["t (s)"] >= start_time) & (data["t (s)"] < t)]
-        slope = np.polyfit(time_series, data_series, 1)[0] * 60  # slope in mL/min/kg/min
-        plt.text(t + 5, avg_rel_vo2 - 5, f"{slope:.1f} 1/min", color="red", fontsize=8)
         # Print bouts number in the middle of the bout
         n_bout = it + 1
         if participant_id == "HAB39" and session == "pre":
             n_bout += 2  # two bouts were excluded at the start
-        plt.text((start_time + t) / 2, 5, str(n_bout), color="black", fontsize=12, ha="center")
         res["trial_no"].append(n_bout)
         res["avg_vo2kg"].append(avg_rel_vo2)
         res["avg_vco2kg"].append(avg_rel_vco2)
 
-    for t in data["t (s)"][marker_start_bout_mask]:
-        plt.axvline(t, color="green", linestyle="--", alpha=0.5)
-    title = f"{participant_id} - {session}"
-    if is_adjusted:
-        title += " (VO2/kg adjusted x3)"
-    plt.title(title)
-    plt.gca().set_ylim(0, 55)
+    if make_plots:
+        plt.close()
+        plt.figure(figsize=(12, 6))
+        sns.lineplot(data=data, x="t (s)", y="VO2/kg (mL/min/kg)")
+        for it, t in enumerate(data["t (s)"][marker_end_bout_mask]):
+            plt.axvline(t, color="red", linestyle="--", alpha=0.5)
+            # go back average_window_seconds and plot average
+            start_time = t - average_window_seconds
+            end_time = t
+            roi_vo2_rel = data.loc[(data["t (s)"] >= start_time) & (data["t (s)"] < t), "VO2/kg (mL/min/kg)"]
+            roi_vco2_abs = data.loc[(data["t (s)"] >= start_time) & (data["t (s)"] < t), "VCO2 (mL/min)"]
+            roi_vco2_rel = roi_vco2_abs / meta["Gewicht (kg)"]
+            avg_rel_vo2 = roi_vo2_rel.mean()
+            avg_rel_vco2 = roi_vco2_rel.mean()
+            plt.plot([start_time, t], [avg_rel_vo2, avg_rel_vo2], color="red", linestyle="--", alpha=0.5)
+            plt.text(t + 10, avg_rel_vo2, f"{avg_rel_vo2:.1f}", color="red", fontsize=8)
+            # add regression line and text with the slope
+            sns.regplot(x="t (s)", y="VO2/kg (mL/min/kg)", data=data.loc[(data["t (s)"] >= start_time) & (data["t (s)"] < t)], scatter=False, color="red", line_kws={"alpha": 0.5})
+            time_series = data["t (s)"][(data["t (s)"] >= start_time) & (data["t (s)"] < t)]
+            data_series = data["VO2/kg (mL/min/kg)"][(data["t (s)"] >= start_time) & (data["t (s)"] < t)]
+            slope = np.polyfit(time_series, data_series, 1)[0] * 60  # slope in mL/min/kg/min
+            plt.text(t + 5, avg_rel_vo2 - 5, f"{slope:.1f} 1/min", color="red", fontsize=8)
+            # Print bouts number in the middle of the bout
+            n_bout = it + 1
+            if participant_id == "HAB39" and session == "pre":
+                n_bout += 2  # two bouts were excluded at the start
+            plt.text((start_time + t) / 2, 5, str(n_bout), color="black", fontsize=12, ha="center")
+            res["trial_no"].append(n_bout)
+            res["avg_vo2kg"].append(avg_rel_vo2)
+            res["avg_vco2kg"].append(avg_rel_vco2)
 
-    if path_plots:
-        path_plots.mkdir(parents=True, exist_ok=True)
-        plt.savefig(path_plots / f"{participant_id}_{session}_vo2kg.png")
+        for t in data["t (s)"][marker_start_bout_mask]:
+            plt.axvline(t, color="green", linestyle="--", alpha=0.5)
+        title = f"{participant_id} - {session}"
+        if is_adjusted:
+            title += " (VO2/kg adjusted x3)"
+        plt.title(title)
+        plt.gca().set_ylim(0, 55)
+
+        if path_plots:
+            path_plots.mkdir(parents=True, exist_ok=True)
+            plt.savefig(path_plots / f"{participant_id}_{session}_vo2kg.png")
     return res
 
 
@@ -291,20 +315,40 @@ def remove_skewed_trials(df):
     return df
 
 
+def spiro_func(row: pd.Series) -> dict:
+    data, meta = read_cosmed_excel(row.path)
+    values_dict = analyze_file(data, meta, row.participant_id, row.session)
+    return values_dict
+
+
 if __name__ == '__main__':
     RECALC = False
-    if RECALC:
-        df_spiro = calc_spiro_metrics()
-        safe_path_spiro_results(df_spiro)
-    else:
-        df_spiro = load_df_spiro()
-    # count rows per participant_id and session
-    counts = df_spiro.groupby(['participant_id', 'session']).size()
-    counts_per_participant = counts.groupby('participant_id').sum()
 
-    df_spiro = add_shoe_condition(df_spiro)
-    df_demographics = get_demographics()
-    df_spiro = add_running_economy(df_spiro, df_demographics)
-    df_spiro = remove_dropouts(df_spiro)
-    df_spiro = remove_skewed_trials(df_spiro)
-    safe_path_spiro_results(df_spiro)
+    path_spiro_root = get_spiro_path_root()
+    path_spiro_raw = path_spiro_root / "raw"
+
+    spiro_bp = BatchProcessor(path_spiro_raw,
+                              file_pattern=".xlsx",
+                              level_names=["participant_id", "session", "trial"])
+    spiro_bp.filter(participant_id=DROPOUTS, method="remove", inplace=True)
+
+    res = spiro_bp.apply(spiro_func)
+    #
+    foo = 1
+    foo = pd.json_normalize(res)
+    #
+    # if RECALC:
+    #     df_spiro = calc_spiro_metrics()
+    #     safe_path_spiro_results(df_spiro)
+    # else:
+    #     df_spiro = load_df_spiro()
+    # # count rows per participant_id and session
+    # counts = df_spiro.groupby(['participant_id', 'session']).size()
+    # counts_per_participant = counts.groupby('participant_id').sum()
+    #
+    # df_spiro = add_shoe_condition(df_spiro)
+    # df_demographics = get_demographics()
+    # df_spiro = add_running_economy(df_spiro, df_demographics)
+    # df_spiro = remove_dropouts(df_spiro)
+    # # df_spiro = remove_skewed_trials(df_spiro)
+    # safe_path_spiro_results(df_spiro)
