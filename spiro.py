@@ -11,14 +11,14 @@ from labtools.systems.cosmed.convenience import read_cosmed_excel
 from common import DROPOUTS, PARTICIPANT_IDS, SESSIONS, get_path_root
 
 
-def analyze_file(data, meta, participant_id, session, path_plots=None) -> dict:
+def analyze_file(data, meta, participant_id, session, path_plots=None) -> list:
     make_plots = False if path_plots is None else True
     # Placeholder for analysis logic
     meta_id = meta["Nachname"]
     if meta_id != participant_id:
         warnings.warn(f"Meta participant ID '{meta_id}' does not match expected ID '{participant_id}' for session '{session}'. Skipping analysis for this file.")
-        return dict()
-    # rename necessary columns
+        return []
+    # rename necessary columns (cosmed apparently decided to change the capitalization at some point...)
     wrong_column_names = ["VO2/kg (mL/min/Kg)", "VO2/Kg (mL/min/Kg)"]
     if any([wcn in data.keys() for wcn in wrong_column_names]):
         i_wrong = [wcn in data.keys() for wcn in wrong_column_names].index(True)
@@ -71,28 +71,30 @@ def analyze_file(data, meta, participant_id, session, path_plots=None) -> dict:
 
     # return 0
 
-
     average_window_seconds = 180
-    keys = ["trial_no", "avg_vo2kg", "avg_vco2kg"]
-    res = {k: [] for k in keys}
+    res = list()
+    column_names_map = {
+        "avg_vo2kg": "VO2/kg (mL/min/kg)",
+        "avg_vco2kg": "VCO2 (mL/min)",
+        "avg_vent": "VE (L/min)",
+        "avg_hr": "HF (bpm)"}
+    col_values = dict().fromkeys(column_names_map.keys())
 
     for it, t in enumerate(data["t (s)"][marker_end_bout_mask]):
+        bout_res = dict()
         # go back average_window_seconds and plot average
         start_time = t - average_window_seconds
-        roi_vo2_rel = data.loc[(data["t (s)"] >= start_time) & (data["t (s)"] < t), "VO2/kg (mL/min/kg)"]
-        roi_vco2_abs = data.loc[(data["t (s)"] >= start_time) & (data["t (s)"] < t), "VCO2 (mL/min)"]
-        roi_vco2_rel = roi_vco2_abs / meta["Gewicht (kg)"]
-        avg_rel_vo2 = roi_vo2_rel.mean()
-        avg_rel_vco2 = roi_vco2_rel.mean()
-        time_series = data["t (s)"][(data["t (s)"] >= start_time) & (data["t (s)"] < t)]
-        data_series = data["VO2/kg (mL/min/kg)"][(data["t (s)"] >= start_time) & (data["t (s)"] < t)]
+        for k, col_name in column_names_map.items():
+            col_values[k] = data.loc[(data["t (s)"] >= start_time) & (data["t (s)"] < t), col_name].mean()
+        # normalize vco2 to body weight
+        col_values["avg_vco2kg"] = col_values["avg_vco2kg"] / meta["Gewicht (kg)"]
         # Print bouts number in the middle of the bout
         n_bout = it + 1
         if participant_id == "HAB39" and session == "pre":
             n_bout += 2  # two bouts were excluded at the start
-        res["trial_no"].append(n_bout)
-        res["avg_vo2kg"].append(avg_rel_vo2)
-        res["avg_vco2kg"].append(avg_rel_vco2)
+        bout_res["trial_no"] = n_bout
+        bout_res.update(col_values)
+        res.append(bout_res)
 
     if make_plots:
         plt.close()
@@ -215,7 +217,7 @@ def add_shoe_condition(df: pd.DataFrame) -> pd.DataFrame:
     df_merged = pd.merge(df, df_shoe_order, on=['participant_id', 'session', 'trial_no'], how='inner')
     # df_merged["participant_id"].value_counts().max().nunique()
     # reorder:
-    df_merged = df_merged[['participant_id', 'int_group', 'session', 'trial_no', 'shoe_condition', 'shoe_condition_long', 'avg_vo2kg', 'avg_vco2kg']]
+    # df_merged = df_merged[['participant_id', 'int_group', 'session', 'trial_no', 'shoe_condition', 'shoe_condition_long', 'avg_vo2kg', 'avg_vco2kg']]
     # df_merged = df_merged.rename(columns={"shoe": "shoe_condition"})
     return df_merged
 
@@ -226,7 +228,7 @@ def load_df_spiro():
     return df
 
 
-def safe_path_spiro_results(df_spiro_results):
+def save_path_spiro_results(df_spiro_results):
     path_spiro_results = get_path_spiro_results()
     df_spiro_results.to_excel(path_spiro_results, index=False)
 
@@ -267,14 +269,15 @@ def calc_spiro_metrics() -> pd.DataFrame:
 
 def get_demographics():
     path_data_root = get_path_root()
-    path_demographics = path_data_root / "demographics_session_info.xlsx"
-    df_demo = pd.read_excel(path_demographics, nrows=70)
+    # path_demographics = path_data_root / "demographics_session_info.xlsx"
+    path_demographics = path_data_root / "demographics_master.xlsx"
+    df_demo = pd.read_excel(path_demographics)
 
-    df_out = df_demo[['participant_id', 'sex', 'DOB', 'height_cm', 'weight_kg', 'age']].copy()
-    df_out['sex'][df_out['sex'] == "w"] = 'f'  # recode 'w' to 'f'
-    # add running speed column based on sex column
-    df_out["speed"] = df_demo["sex"].map({"f": 12.0, "m": 14.0, "w": 12.0})
-    return df_out
+    # df_out = df_demo[['participant_id', 'group', 'sex', 'DOB', 'height_cm', 'weight_kg', 'age']].copy()
+    # df_out['sex'][df_out['sex'] == "w"] = 'f'  # recode 'w' to 'f'
+    # # add running speed column based on sex column
+    # df_out["speed"] = df_demo["sex"].map({"f": 12.0, "m": 14.0, "w": 12.0})
+    return df_demo
 
 
 def peronnet_massicotte_1991(VO2, VCO2):
@@ -285,13 +288,17 @@ def peronnet_massicotte_1991(VO2, VCO2):
 
 
 def add_running_economy(df_spiro, df_demo) -> pd.DataFrame:
+    df_demo = df_demo[["participant_id", "weight_kg", "sex"]]
     df_eco = pd.merge(df_spiro, df_demo, on=['participant_id'], how='left')
     # add oxygen cost of transport (ml/kg/km)
-    df_eco['ocot'] = df_eco['avg_vo2kg'] / (df_eco['speed'] / 60)
+    if not "speed" in df_eco:
+        # add based on sex column:
+        df_eco["running_speed_kmh"] = df_eco.apply(lambda row: 12 if row.sex == "f" else 14, axis=1)
+    df_eco['ocot'] = df_eco['avg_vo2kg'] / (df_eco['running_speed_kmh'] / 60)
     # add energetic cost in W/kg according to Peronnet & Massicotte 1991
     df_eco['energetic_cost_W_kg'] = peronnet_massicotte_1991(df_eco['avg_vo2kg'] / 60000, df_eco['avg_vco2kg'] / 60000) * 1000
     # add energetic cost of transport in J/kg/m
-    df_eco['ecot'] = df_eco['energetic_cost_W_kg'] / (df_eco['speed'] / 3.6)
+    df_eco['ecot'] = df_eco['energetic_cost_W_kg'] / (df_eco['running_speed_kmh'] / 3.6)
     return df_eco
 
 
@@ -322,20 +329,48 @@ def spiro_func(row: pd.Series) -> dict:
 
 
 if __name__ == '__main__':
-    RECALC = False
+    RECALC = True
 
     path_spiro_root = get_spiro_path_root()
     path_spiro_raw = path_spiro_root / "raw"
 
+    df_demographics = get_demographics()
+
     spiro_bp = BatchProcessor(path_spiro_raw,
                               file_pattern=".xlsx",
-                              level_names=["participant_id", "session", "trial"])
-    spiro_bp.filter(participant_id=DROPOUTS, method="remove", inplace=True)
+                              level_names=["participant_id", "session", "file"])
+    # spiro_bp.filter(participant_id=DROPOUTS, method="remove", inplace=True)
 
-    res = spiro_bp.apply(spiro_func)
-    #
-    foo = 1
-    foo = pd.json_normalize(res)
+    res = spiro_bp.apply(spiro_func,
+                         multiprocess=True)
+    # Reformat output and merge with index
+    df_results = pd.json_normalize(res)
+    df_results = (
+        pd.Series(res, name="bout_data")
+        .to_frame()
+        .join(spiro_bp.index.reset_index(drop=True))
+        .explode("bout_data")
+        .reset_index(drop=True)
+    )
+    df_spiro = pd.concat(
+        [df_results.drop(columns=["bout_data", "path"]),
+         pd.json_normalize(df_results["bout_data"])],
+        axis=1
+    )
+
+    # Add shoe condition matched to the trial no
+    df_spiro = add_shoe_condition(df_spiro)
+    # Add running economy values based on participant characteristics
+    df_spiro = add_running_economy(df_spiro, df_demographics)
+    # remove unnecessary cols:
+    cols_not_neded = ["is_aft", "file"]
+    for col in cols_not_neded:
+        if col in df_spiro.columns:
+            df_spiro.drop(col, axis=1, inplace=True)
+
+    # Save the file
+    save_path_spiro_results(df_spiro)
+
     #
     # if RECALC:
     #     df_spiro = calc_spiro_metrics()
