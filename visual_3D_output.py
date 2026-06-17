@@ -15,13 +15,13 @@ def _unwrap_matlab_scipy_result(x):
     return arr[0] if arr.size else np.nan
 
 
-def read_metrics_mat(path: Path) -> dict:
+def read_metrics_mat(row: pd.Series) -> dict:
     """Read selected gait metrics from the V3D Running Report mat-file exports.
 
     Cells with mixed singleton/empty entries are unwrapped to plain
     floats, then averaged across trials within the file.
     """
-    data = loadmat(str(path))
+    data = loadmat(str(row.path))
     params = [
         "Stride_Length_Mean",
         "Stride_Width_Mean",
