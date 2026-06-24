@@ -299,6 +299,8 @@ def add_running_economy(df_spiro, df_demo) -> pd.DataFrame:
     df_eco['energetic_cost_W_kg'] = peronnet_massicotte_1991(df_eco['avg_vo2kg'] / 60000, df_eco['avg_vco2kg'] / 60000) * 1000
     # add energetic cost of transport in J/kg/m
     df_eco['ecot'] = df_eco['energetic_cost_W_kg'] / (df_eco['running_speed_kmh'] / 3.6)
+    # remove sex, weight, and speed columns
+    df_eco.drop(columns=['weight_kg', 'sex', 'running_speed_kmh'], inplace=True)
     return df_eco
 
 
@@ -329,7 +331,7 @@ def spiro_func(row: pd.Series) -> dict:
 
 
 if __name__ == '__main__':
-    RECALC = True
+    RECALC = False
 
     path_spiro_root = get_spiro_path_root()
     path_spiro_raw = path_spiro_root / "raw"
@@ -340,50 +342,33 @@ if __name__ == '__main__':
                               file_pattern=".xlsx",
                               level_names=["participant_id", "session", "file"])
     # spiro_bp.filter(participant_id=DROPOUTS, method="remove", inplace=True)
+    if RECALC:
+        res = spiro_bp.apply(spiro_func,
+                             multiprocess=True)
+        # Reformat output and merge with index
+        df_results = pd.json_normalize(res)
+        df_results = (
+            pd.Series(res, name="bout_data")
+            .to_frame()
+            .join(spiro_bp.index.reset_index(drop=True))
+            .explode("bout_data")
+            .reset_index(drop=True)
+        )
+        df_spiro = pd.concat(
+            [df_results.drop(columns=["bout_data", "path"]),
+             pd.json_normalize(df_results["bout_data"])],
+            axis=1
+        )
 
-    res = spiro_bp.apply(spiro_func,
-                         multiprocess=True)
-    # Reformat output and merge with index
-    df_results = pd.json_normalize(res)
-    df_results = (
-        pd.Series(res, name="bout_data")
-        .to_frame()
-        .join(spiro_bp.index.reset_index(drop=True))
-        .explode("bout_data")
-        .reset_index(drop=True)
-    )
-    df_spiro = pd.concat(
-        [df_results.drop(columns=["bout_data", "path"]),
-         pd.json_normalize(df_results["bout_data"])],
-        axis=1
-    )
+        save_path_spiro_results(df_spiro)
+    else:
+        df_spiro = load_df_spiro()
 
-    # Add shoe condition matched to the trial no
-    df_spiro = add_shoe_condition(df_spiro)
+
+
     # Add running economy values based on participant characteristics
-    df_spiro = add_running_economy(df_spiro, df_demographics)
-    # remove unnecessary cols:
-    cols_not_neded = ["is_aft", "file"]
-    for col in cols_not_neded:
-        if col in df_spiro.columns:
-            df_spiro.drop(col, axis=1, inplace=True)
+    df_spiro_with_eco = add_running_economy(df_spiro, df_demographics)
 
-    # Save the file
-    save_path_spiro_results(df_spiro)
+    path_with_eco = path_spiro_root / "results_spiro_plus_eco.xlsx"
+    df_spiro_with_eco.to_excel(path_with_eco, index=False)
 
-    #
-    # if RECALC:
-    #     df_spiro = calc_spiro_metrics()
-    #     safe_path_spiro_results(df_spiro)
-    # else:
-    #     df_spiro = load_df_spiro()
-    # # count rows per participant_id and session
-    # counts = df_spiro.groupby(['participant_id', 'session']).size()
-    # counts_per_participant = counts.groupby('participant_id').sum()
-    #
-    # df_spiro = add_shoe_condition(df_spiro)
-    # df_demographics = get_demographics()
-    # df_spiro = add_running_economy(df_spiro, df_demographics)
-    # df_spiro = remove_dropouts(df_spiro)
-    # # df_spiro = remove_skewed_trials(df_spiro)
-    # safe_path_spiro_results(df_spiro)

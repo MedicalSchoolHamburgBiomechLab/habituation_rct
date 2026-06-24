@@ -34,3 +34,12 @@ def get_demographics() -> pd.DataFrame:
     path_data_root = get_path_root()
     path_demographics = path_data_root / "demographics_session_info.xlsx"
     return pd.read_excel(path_demographics)
+
+
+def get_shoe_sequence_df():
+    path_root = get_path_root()
+    path_master_out = path_root / "shoe_sequence_master.xlsx"
+    df = pd.read_excel(path_master_out)
+    df.drop(columns=["shoe_condition", "Unnamed: 5"], inplace=True)
+    df.rename(columns={"true_condition": "shoe_condition"}, inplace=True)
+    return df
