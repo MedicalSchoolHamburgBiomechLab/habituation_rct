@@ -8,7 +8,7 @@ from labtools.batch_processor import BatchProcessor
 from labtools.systems.zebris.spatio_temnporal_parameters import analyze
 
 from common import get_path_root, get_shoe_sequence_df, path_data_root
-from demographics import get_demographics
+from demographics import get_demographics_master
 
 CONDITION_PATTERN = re.compile(r"_Laufanalyse_(AFT|NonAFT|INT)_")
 
@@ -200,7 +200,7 @@ def check_datetime_stamp(df_pressure, df_demographics):
         if row.session == "PRE":
             return df_demographics.loc[df_demographics["participant_id"] == row.participant_id, "date_session_1"].iloc[0]
         elif row.session == "POST":
-            return df_demographics.loc[df_demographics["participant_id"] == row.participant_id, "date_session_2"].iloc[0]
+            return df_demographics.loc[df_demographics["participant_id"] == row.participant_id, "   date_session_2"].iloc[0]
 
     df_pressure["session_date_per_demographics_table"] = df_pressure.apply(lambda row: get_demographics_date(row), axis=1)
     df_pressure["session_date_check"] = df_pressure["session_date_per_trial_name"] == df_pressure["session_date_per_demographics_table"]
@@ -214,7 +214,7 @@ if __name__ == "__main__":
     if RECALC:
         process()
     df_pressure = load_pressure_data()
-    df_demographics = get_demographics()
+    df_demographics = get_demographics_master()
     # check_datetime_stamp(df_pressure, df_demographics)
     #
     df_pressure_trial_no = add_trial_column(df_pressure)

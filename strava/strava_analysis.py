@@ -8,7 +8,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import pandas as pd
 
-from common import PARTICIPANT_IDS, get_demographics, get_path_root
+from common import PARTICIPANT_IDS, get_demographics_session_info, get_path_root
 import warnings
 
 
@@ -104,7 +104,7 @@ def check_date_range(df_strava: pd.DataFrame, participant_id: str):
 
 def get_pre_post_dates(participant_id: str) -> (pd.Timestamp, pd.Timestamp):
     # 1. look up the demographics excel and check for the PRE- and POST-Session dates
-    df_demo = get_demographics()
+    df_demo = get_demographics_session_info()
     start_date = df_demo[(df_demo['participant_id'] == participant_id) & (df_demo['session'] == 'PRE')]['session_date'].values[0]
     # 1.1 Convert strings to datetime if necessary
     if isinstance(start_date, str):

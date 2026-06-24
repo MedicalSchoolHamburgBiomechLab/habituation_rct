@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 from labtools.batch_processor import BatchProcessor
 
-from common import get_demographics, DROPOUTS
+from common import get_demographics_session_info, DROPOUTS
 from strava.strava_analysis import get_path_strava_root
 
 
@@ -22,7 +22,7 @@ def process_get_runs_only(path: Path) -> pd.DataFrame:
 
 def get_pre_post_dates(participant_id: str) -> (pd.Timestamp, pd.Timestamp):
     # 1. look up the demographics excel and check for the PRE- and POST-Session dates
-    df_demo = get_demographics()
+    df_demo = get_demographics_session_info()
     start_date = df_demo[(df_demo['participant_id'] == participant_id) & (df_demo['session'] == 'PRE')]['session_date'].values[0]
     # 1.1 Convert strings to datetime if necessary
     if isinstance(start_date, str):
@@ -217,7 +217,7 @@ if __name__ == '__main__':
     bp = BatchProcessor(path_raw,
                         level_names=["participant", "activities_file"],
                         file_pattern="activities*.xlsx")
-    bp.filter(participant=DROPOUTS, method="remove", inplace=True)
+    # bp.filter(participant=DROPOUTS, method="remove", inplace=True)
     print(bp.summary())
     summary(bp)
     metrics(bp)

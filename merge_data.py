@@ -17,7 +17,7 @@ def add_shoe_condition_by_trial_no(df):
 def add_demographics(df):
     # add demographic data that will be used as covariates for the analysis
     df_demographics = get_demographics()
-    add_columns = ["participant_id", "disposition", "height_cm", "weight_kg", "bmi", "age_session_1", "sex", "int_group"]
+    add_columns = ["participant_id", "disposition", "height_cm", "weight_kg", "bmi", "age_session_1", "sex", "group"]
     df_demographics = df_demographics[add_columns]
     df_demographics.rename(columns={"age_session_1": "age"}, inplace=True)
     return df.merge(df_demographics, on="participant_id", how="left")
@@ -58,7 +58,7 @@ def load_spiro_with_eco():
     return pd.read_excel(path_with_eco)
 
 
-if __name__ == '__main__':
+def make_repeated_measures_dataframe():
     df_spiro = load_spiro_with_eco()
     df_spiro.drop(columns="file", inplace=True)
     df_pressure = load_pressure_data_with_trial_no()
@@ -74,3 +74,19 @@ if __name__ == '__main__':
     path_root = get_path_root()
     path_merged = path_root / "merged.xlsx"
     df_merged.to_excel(path_merged)
+
+def merge_strava_and_demographics():
+    df_demo = get_demographics()
+    path_root = get_path_root()
+    path_df_strava = path_root / "strava" / 'metrics.xlsx'
+    df_strava = pd.read_excel(path_df_strava)
+    if "participant" in df_strava.columns:
+        df_strava.rename(columns={"participant": "participant_id"}, inplace=True)
+
+    df_merged = df_strava.merge(df_demo, on=["participant_id"], how="left")
+    file_out = path_root / "demographics_plus_strava.xlsx"
+    df_merged.to_excel(file_out, index=False)
+
+
+if __name__ == '__main__':
+    merge_strava_and_demographics()

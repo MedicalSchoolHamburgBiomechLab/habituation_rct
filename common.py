@@ -30,7 +30,7 @@ def get_path_root() -> Path:
 path_data_root = get_path_root()
 
 
-def get_demographics() -> pd.DataFrame:
+def get_demographics_session_info() -> pd.DataFrame:
     path_data_root = get_path_root()
     path_demographics = path_data_root / "demographics_session_info.xlsx"
     return pd.read_excel(path_demographics)

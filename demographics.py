@@ -1,12 +1,24 @@
 import pandas as pd
-from seaborn import countplot
 
-from common import get_path_root
+from common import get_demographics_session_info, get_path_root
 
 
-def get_demographics():
+def make_demographics_master():
+    df_info = get_demographics_session_info()
+    foo = 1
+    return
+
+
+def get_demographics_master():
     path_data_root = get_path_root()
     path_demographics = path_data_root / "demographics_master.xlsx"
+    df_demo = pd.read_excel(path_demographics)
+    return df_demo
+
+
+def get_demographics_plus_strava():
+    path_data_root = get_path_root()
+    path_demographics = path_data_root / "demographics_plus_strava.xlsx"
     df_demo = pd.read_excel(path_demographics)
     return df_demo
 
@@ -23,7 +35,6 @@ def print_disposition(df_demo):
                 print(f"\t{count}x {reason}")
         cols = ["age_session_1", "bmi", "weight_kg", "height_cm"]
 
-
     def print_subgroup_info(df_demo: pd.DataFrame, subgroup_disposition: str):
         df_subgroup = df_demo[df_demo["disposition"] == subgroup_disposition]
         print(f"Total number of {subgroup_disposition} cases: {len(df_subgroup)}")
@@ -33,7 +44,6 @@ def print_disposition(df_demo):
         count_aft = len(df[df["group"] == "AFT"])
         count_non_aft = len(df[df["group"] == "NonAFT"])
         print(f"({count_aft} AFT, {count_non_aft} NonAFT)")
-
 
     print('# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #')
     print('All')
@@ -53,7 +63,6 @@ def print_disposition(df_demo):
     print_subgroup_info(df_demo, "adherence_violation")
 
 
-
 def get_summary(df_demo: pd.DataFrame):
     def get_param_table_mean(df, param, name, unit):
         m = df[param].mean()
@@ -69,9 +78,9 @@ def get_summary(df_demo: pd.DataFrame):
 
         data = {
             "param_name": f"{name} ({unit})",
-            "AFT": f"{mean_aft:.1f} ± {std_aft:.1f}",
-            "NonAFT": f"{mean_non_aft:.1f} ± {std_non_aft:.1f}",
-            "Total": f"{m:.1f} ± {std:.1f}"}
+            "AFT": f"{mean_aft:.2f} ± {std_aft:.2f}",
+            "NonAFT": f"{mean_non_aft:.2f} ± {std_non_aft:.2f}",
+            "Total": f"{m:.2f} ± {std:.2f}"}
         df_out = pd.DataFrame(data, index=[0])
         return df_out
 
@@ -87,8 +96,6 @@ def get_summary(df_demo: pd.DataFrame):
         }
         df_out = pd.DataFrame(data, index=[0])
         return df_out
-
-
 
     def get_param_table_count(df, param=None, name=None, categories=None):
         if param is None:
@@ -129,24 +136,33 @@ def get_summary(df_demo: pd.DataFrame):
             ("weight_kg", "Bodymass", "kg"),
             ("height_cm", "Height", "cm"),
             ("bmi", "BMI", "kg/m^2"),
+            ("WA_points_max", "WA Points", ""),
+            # strava metrics:
+            ("kilometers_all", "Total distance", "km"),
+            ("kilometers_intervention", "Distance in intervention shoes", "km"),
+            ("distance_intervention_percent", "Proportion distance in intervention shoes", "%"),
+            ("number_weeks_intervention", "Number of weeks with at least one run in intervention shoes", ""),
         ]
         df_all = pd.DataFrame()
         for param, name, unit in list_print_params:
             df_param = get_param_table_mean(df, param, name, unit)
             df_all = pd.concat([df_all, df_param], axis=0)
 
-        df_sex = get_param_table_count(df, "sex", "(female/male)", ["m", "f"])
+        df_sex = get_param_table_count(df, "sex", "(female/male)", ["f", "m"])
         df_all = pd.concat([df_all, df_sex], axis=0)
-
 
         df_count = get_param_table_count(df)
         df_all = pd.concat([df_all, df_count], axis=0)
-
 
         df_all.set_index("param_name", inplace=True)
 
         return df_all
 
+    # all
+    df_summary_all = get_params_df(df_demo)
+    # modified intention-to-tread
+    df_mitt = df_demo[df_demo["disposition"] != "lost_to_follow_up"]
+    df_summary_mitt = get_params_df(df_mitt)
     # lost to follow up
     df_ltfu = df_demo[df_demo["disposition"] == "lost_to_follow_up"]
     df_summary_ltfu = get_params_df(df_ltfu)
@@ -161,16 +177,19 @@ def get_summary(df_demo: pd.DataFrame):
     df_dropouts = df_demo[df_demo["disposition"] != "completer"]
     df_summary_dropouts = get_params_df(df_dropouts)
 
-    d = {"Completer": df_summary_completer, "Dropouts": df_summary_dropouts}
+    d = {"Completer": df_summary_completer, "Dropouts": df_summary_dropouts, "All": df_summary_all, "mITT": df_summary_mitt}
     df_summary = pd.concat(d.values(), axis=1, keys=d.keys())
 
     return df_summary
 
 
 if __name__ == '__main__':
-    df_demo = get_demographics()
-    print_disposition(df_demo)
-    df_summary = get_summary(df_demo)
+    df_demo = get_demographics_master()
+    df_demo_plus_strava = get_demographics_plus_strava()
+
+    df = df_demo_plus_strava
+    print_disposition(df)
+    df_summary = get_summary(df)
     path_root = get_path_root()
-    path_summary = path_root / "summary_completer_dropouts.xlsx"
+    path_summary = path_root / "demographics_summary_plus_strava.xlsx"
     df_summary.to_excel(path_summary)

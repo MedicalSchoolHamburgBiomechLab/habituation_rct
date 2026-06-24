@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from common import PARTICIPANT_IDS, get_demographics, get_path_root
+from common import PARTICIPANT_IDS, get_demographics_session_info, get_path_root
 from spiro import get_spiro_path_root, load_df_spiro
 
 import pandas as pd
