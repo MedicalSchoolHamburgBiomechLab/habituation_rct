@@ -88,5 +88,30 @@ def merge_strava_and_demographics():
     df_merged.to_excel(file_out, index=False)
 
 
+def load_kinematics_data():
+    path_root = get_path_root()
+    path_kinematics = path_root / "kinematics" / "results_kinematics.xlsx"
+    df_kinematics = pd.read_excel(path_kinematics)
+    if "participant" in df_kinematics.columns:
+        df_kinematics.rename(columns={"participant": "participant_id"}, inplace=True)
+    if "trial" in df_kinematics.columns:
+        df_kinematics.drop(columns="trial", inplace=True)
+    return df_kinematics
+
+def make_kinematics_dataframe():
+    df_kinematics = load_kinematics_data()
+    df_kinematics.dropna(subset=["trial_no"], inplace=True)
+    df_kinematics.drop(columns="filename", inplace=True)
+
+    # add demographic data
+    df_merged = add_demographics(df_kinematics)
+    # add shoe condition
+    df_merged = add_shoe_condition_by_trial_no(df_merged)
+
+    path_root = get_path_root()
+    path_merged = path_root / "kinemaics_merged.xlsx"
+    df_merged.to_excel(path_merged)
+
+
 if __name__ == '__main__':
-    merge_strava_and_demographics()
+    make_kinematics_dataframe()

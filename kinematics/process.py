@@ -12,6 +12,8 @@ from scipy.io import loadmat
 
 from common import get_path_root
 
+SAVE_JSON = False
+
 
 def get_trial_no(filename: str) -> str:
     trial_no = filename.split("_signals")[0][-1]
@@ -74,6 +76,22 @@ def get_values_at_ic(signal: np.ndarray, events: pd.DataFrame) -> list:
     return values
 
 
+def get_peak_to_peak_per_step(signal: np.ndarray, events: pd.DataFrame, side: str) -> list:
+    ics = events[(events["event"] == "ic") & (events["side"] == side)]["frame"].to_numpy()
+    cl_side = "left" if side == "right" else "right"
+    cl_ics = events[(events["event"] == "ic") & (events["side"] == cl_side)]["frame"].to_numpy()
+    while cl_ics[0] < ics[0]:
+        cl_ics = cl_ics[1:]
+
+    ptps = []
+    for ic, cl_ic in zip(ics, cl_ics):
+        if cl_ic > len(signal):
+            break
+        ptp = np.ptp(signal[ic:cl_ic, :], axis=0)
+        ptps.append(ptp)
+    return ptps
+
+
 def get_rom_during_stance(signal: np.ndarray, events: pd.DataFrame) -> list:
     ics = events[events["event"] == "ic"]["frame"].to_numpy()
     tcs = events[events["event"] == "tc"]["frame"].to_numpy()
@@ -85,6 +103,20 @@ def get_rom_during_stance(signal: np.ndarray, events: pd.DataFrame) -> list:
             break
         stance_phase = signal[ic:tc, :]
         roms.append(np.ptp(stance_phase, axis=0))
+    return roms
+
+
+def get_peak_during_stance(signal: np.ndarray, events: pd.DataFrame) -> list:
+    ics = events[events["event"] == "ic"]["frame"].to_numpy()
+    tcs = events[events["event"] == "tc"]["frame"].to_numpy()
+    roms = []
+    while tcs[0] < ics[0]:
+        tcs = tcs[1:]
+    for ic, tc in zip(ics, tcs):
+        if tc > len(signal):
+            break
+        stance_phase = signal[ic:tc, :]
+        roms.append(np.max(stance_phase, axis=0))
     return roms
 
 
@@ -107,6 +139,7 @@ def func_kinematics(row: pd.Series) -> dict:
     df_ev = pd.DataFrame(events, columns=["frame", "side", "event"])
 
     joints = ["hip", "knee", "ankle"]
+    segments = ["pelvis", "foot"]
     sides = ["left", "right"]
 
     json_data = {}
@@ -131,6 +164,7 @@ def func_kinematics(row: pd.Series) -> dict:
     json_data["meta"]["processed"] = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     json_data["meta"]["n_samples"] = 101
     json_data["joints"] = {j: {} for j in joints}
+    json_data["segments"] = {s: {} for s in segments}
 
     axes_dict = {
         "hip": ["Flexion/Extension", "Add./Abd.", "int./Ext. Rotation"],
@@ -139,16 +173,38 @@ def func_kinematics(row: pd.Series) -> dict:
     }
     params = {j: {} for j in joints}
 
+    #
+    # Pelvis
+    #
+    json_data["segments"]["pelvis"]["com_position"] = {}
+    params["pelvis"] = {}
+    params["pelvis"]["vertical_motion"] = {}
+    for side in sides:
+        #
+        # MAKE NORMALIZED SIGNALS
+        #
+        signal_specifier = "Pelvis_COM_Position"
+        pelvis_com_signal = data[signal_specifier][0][0]
+        pelvis_com_signal_300 = convert_theia_signal(pelvis_com_signal)
+        cycles = make_cycles(pelvis_com_signal_300, df_ev[df_ev["side"] == side.lower()])
+        for cycle in cycles:
+            plt.plot(cycle[:, 2])
+        json_data["segments"]["pelvis"]["com_position"][side] = [c.tolist() for c in cycles]
 
+        ptp = get_peak_to_peak_per_step(signal=pelvis_com_signal_300,
+                                        events=df_ev,
+                                        side=side)
+        pelvis_vertical_motion = float(round(np.mean([v[2] * 100 for v in ptp]), 3))
+        params["pelvis"]["vertical_motion"][side] = pelvis_vertical_motion
 
     for joint in joints:
         json_data["joints"][joint]["axes"] = axes_dict[joint]
         params[joint]["flexion_at_ic"] = {}
         params[joint]["flexion_rom"] = {}
+        params[joint]["flexion_peak"] = {}
         for side in sides:
             signal_specifier = f"{side.capitalize()}_{joint.capitalize()}_Angles"
             angle_signal = data[signal_specifier][0][0]
-
             #
             # MAKE NORMALIZED SIGNALS
             #
@@ -168,26 +224,55 @@ def func_kinematics(row: pd.Series) -> dict:
             flexion_at_ic = float(round(np.mean([v[0] for v in values_at_ic]), 3))
             params[joint]["flexion_at_ic"][side] = flexion_at_ic
 
-            rom_during_stance = get_rom_during_stance(signal=angle_signal_300, events=df_ev[df_ev["side"] == side.lower()])
+            rom_during_stance = get_rom_during_stance(signal=angle_signal_300,
+                                                      events=df_ev[df_ev["side"] == side.lower()])
             flexion_rom = float(round(np.mean([r[0] for r in rom_during_stance]), 3))
             params[joint]["flexion_rom"][side] = flexion_rom
 
+            peak_during_stance = get_peak_during_stance(signal=angle_signal_300,
+                                                        events=df_ev[df_ev["side"] == side.lower()])
+            flexion_peak = float(round(np.mean([r[0] for r in peak_during_stance]), 3))
+            params[joint]["flexion_peak"][side] = flexion_peak
+    #
+    # Overstriding
+    #
+    params["overstriding"] = {}
+    params["overstriding"]["oh"] = {}
+    params["overstriding"]["ok"] = {}
+
+    for side in sides:
+
+        hjc = convert_theia_signal(data[f"{side.capitalize()}_Hip_Center"][0][0])
+        kjc = convert_theia_signal(data[f"{side.capitalize()}_Knee_Center"][0][0])
+        ajc = convert_theia_signal(data[f"{side.capitalize()}_Ankle_Center"][0][0])
+
+        oh_signal = ajc - hjc
+        oh_values = get_values_at_ic(signal=oh_signal, events=df_ev[df_ev["side"] == side.lower()])
+        params["overstriding"]["oh"][side] = float(round(np.mean([ohv[0]*100 for ohv in oh_values]),2))
+
+
+        ok_signal = ajc - kjc
+        ok_values = get_values_at_ic(signal=ok_signal, events=df_ev[df_ev["side"] == side.lower()])
+        params["overstriding"]["ok"][side] = float(round(np.mean([okv[0]*100 for okv in ok_values]),2))
+
+
+
     # safe data
     trial_no = get_trial_no(row.filename)
-    # print(f"{row.filename} - trial_no: {trial_no}")
-    path_root = get_path_root()
-    path_kinematics = path_root / "kinematics"
-    path_out_root = path_kinematics / "json"
-    path_out = path_out_root / row.participant_id / row.session / row.condition
-    path_out.mkdir(exist_ok=True, parents=True)
-
-    filename = f"{row.participant_id}_{row.session}_{row.condition}_{trial_no}.json"
-    path_file_out = path_out / filename
-
-    # with open(path_file_out, "w") as f:
-     #   json.dump(json_data, f)
+    if SAVE_JSON:
+        # print(f"{row.filename} - trial_no: {trial_no}")
+        path_root = get_path_root()
+        path_kinematics = path_root / "kinematics"
+        path_out_root = path_kinematics / "json"
+        path_out = path_out_root / row.participant_id / row.session / row.condition
+        path_out.mkdir(exist_ok=True, parents=True)
+        filename = f"{row.participant_id}_{row.session}_{row.condition}_{trial_no}.json"
+        path_file_out = path_out / filename
+        with open(path_file_out, "w") as f:
+            json.dump(json_data, f)
 
     params["trial_no"] = trial_no
+
     return params
 
 
@@ -270,14 +355,16 @@ def func_plot_hip_flexion(row: pd.Series) -> dict:
     plt.close(fig)
     return out
 
+
 def print_errors(errors):
     for err in errors:
         path = err[0]
         p = path.parent.parent.parent.stem
-        s    = path.parent.parent.stem
+        s = path.parent.parent.stem
         c = path.parent.stem
         f = path.stem
         print(f"{p} {s} {c} {f}: {err[1]}")
+
 
 if __name__ == '__main__':
     path_root = get_path_root()
@@ -285,17 +372,19 @@ if __name__ == '__main__':
     path_signals = path_root / "kinematics" / "mat"
     bp_kin = BatchProcessor(path_signals, "signals.mat", ["participant_id", "session", "condition", "filename"])
 
-    # bp_kin.filter(inplace=True, participant_id=["HAB44"])
+    # bp_kin.filter(inplace=True, participant_id=["HAB11"])
     # res_kinematics = bp_kin.apply(func_plot_hip_flexion,
     #                               multiprocess=True)
+    SAVE_JSON = True
 
-
-    ind = bp_kin.index
     res_kinematics = bp_kin.apply(func_kinematics,
                                   multiprocess=True)
+
+    ind = bp_kin.index
+
     print_errors(bp_kin.errors)
 
-
+    # raise NotImplementedError
 
     df_results_kinematics = pd.json_normalize(res_kinematics)
     df_dict_kinematics = pd.concat([bp_kin.index.reset_index(drop=True), df_results_kinematics], axis=1)
@@ -308,8 +397,6 @@ if __name__ == '__main__':
     missing_trial_no = df_dict_kinematics[pd.isna(df_dict_kinematics["trial_no"])]
     for r, row in missing_trial_no.iterrows():
         print(row)
-
-
 
     df_long = pd.wide_to_long(
         df_dict_kinematics,
@@ -324,14 +411,6 @@ if __name__ == '__main__':
     path_file_results = path_kinematics / filename
 
     df_long.to_excel(path_file_results, index=False)
-
-    for err in bp_kin.errors:
-        path = err[0]
-        p = path.parent.parent.parent.stem
-        s    = path.parent.parent.stem
-        c = path.parent.stem
-        f = path.stem
-        print(f"{p} {s} {c} {f}: {err[1]}")
 
     print(bp_kin.index.head())
 
