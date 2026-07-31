@@ -4,8 +4,11 @@ from itertools import product
 from pathlib import Path
 
 import pandas as pd
+from labtools.analyses.kinetics.event_detection import get_force_events_treadmill
 from labtools.batch_processor import BatchProcessor
 from labtools.systems.zebris.spatio_temnporal_parameters import analyze
+from labtools.systems.zebris.utils import get_force
+from labtools.utils.c3d import load_c3d
 
 from common import get_path_root, get_shoe_sequence_df, path_data_root
 from demographics import get_demographics_master
@@ -21,6 +24,24 @@ def extract_condition(trial: str) -> str | None:
 def process_trials(row: pd.Series) -> dict:
     out = analyze(row.path)
     return out
+
+
+def get_events(row: pd.Series) -> dict:
+    data, meta = load_c3d(row.path)
+    sample_rate = data['analog_rate']
+    f_z_r, f_z_l = get_force(data, True)
+
+    evt_r = get_force_events_treadmill(f_z=f_z_r,
+                                     sample_rate=sample_rate)
+    # convert from np.int to int
+    evt_r['ic'] = [int(x) for x in evt_r['ic']]
+    evt_r['tc'] = [int(x) for x in evt_r['tc']]
+    evt_l = get_force_events_treadmill(f_z=f_z_l,
+                                       sample_rate=sample_rate)
+    evt_l['ic'] = [int(x) for x in evt_l['ic']]
+    evt_l['tc'] = [int(x) for x in evt_l['tc']]
+
+    return {"left": evt_l, "right": evt_r}
 
 
 def process():
@@ -51,13 +72,22 @@ def process():
     #
     # mask = pd.to_numeric(copy["col"], errors="coerce").notna()
 
-    results = bp.apply(process_trials,
-                       multiprocess=True)
-    df_results = pd.json_normalize(results)
-    df_dict = pd.concat([bp.index.reset_index(drop=True), df_results], axis=1)
-    df_dict.drop(columns=["path"], inplace=True)
+    # results_metrics = bp.apply(process_trials,
+    #                    multiprocess=True)
+    # df_results_metrics = pd.json_normalize(results_metrics)
+    # df_dict_metrics = pd.concat([bp.index.reset_index(drop=True), df_results_metrics], axis=1)
+    # df_dict_metrics.drop(columns=["path"], inplace=True)
+    # save_pressure_data(df_dict_metrics)
 
-    save_pressure_data(df_dict)
+
+    # calculate events and save
+    results_events = bp.apply(get_events,
+                       multiprocess=True)
+    df_results_events = pd.json_normalize(results_events)
+    df_dict_events = pd.concat([bp.index.reset_index(drop=True), df_results_events], axis=1)
+    df_dict_events.drop(columns=["path"], inplace=True)
+
+    save_events(df_dict_events)
 
 
 def analyze_results():
@@ -98,6 +128,12 @@ def save_pressure_data(df_pressure: pd.DataFrame):
     df_pressure.to_excel(path_df_out, index=False)
 
 
+def save_events(df_events: pd.DataFrame):
+    path_data_root = get_path_root()
+    path_df_out = path_data_root / "pressure" / "events.xlsx"
+    df_events.to_excel(path_df_out, index=False)
+
+
 # def get_shoe_sequence_df():
 #     path_root = get_path_root()
 #     path_shoe_sequence_pre = path_root / "balanced_shoe_sequence_PRE.xlsx"
@@ -120,8 +156,6 @@ def save_pressure_data(df_pressure: pd.DataFrame):
 #
 #     return df_shoe_sequence_long
 #
-
-
 
 
 def _parse(row):
@@ -188,6 +222,7 @@ def add_trial_column(df: pd.DataFrame):
 
     return df_out
 
+
 def check_datetime_stamp(df_pressure, df_demographics):
     # add "session_date_per_trial_name" column to pressure df
     df_pressure["session_date_per_trial_name"] = pd.to_datetime(
@@ -210,25 +245,25 @@ def check_datetime_stamp(df_pressure, df_demographics):
 
 
 if __name__ == "__main__":
-    RECALC = False
+    RECALC = True
     if RECALC:
         process()
-    df_pressure = load_pressure_data()
-    df_demographics = get_demographics_master()
-    # check_datetime_stamp(df_pressure, df_demographics)
+    # df_pressure = load_pressure_data()
+    # df_demographics = get_demographics_master()
+    # # check_datetime_stamp(df_pressure, df_demographics)
+    # #
+    # df_pressure_trial_no = add_trial_column(df_pressure)
     #
-    df_pressure_trial_no = add_trial_column(df_pressure)
-
-    # add a "matching" column for testing
-
-    # df_pressure_trial_no["matching"] = df_pressure_trial_no.apply(lambda row: row.file_no == row.trial_no, axis=1)
-    # df_pressure_trial_no.dropna(subset=["trial"], inplace=True)
-
-    path_root = get_path_root()
-    path_pressure_trial_no = path_root / "pressure" / "results_pressure_trial_no.xlsx"
-    df_pressure_trial_no.to_excel(path_pressure_trial_no, index=False)
-    # df_pressure.sort_values(by=['participant_id', 'session', 'trial_no'], inplace=True)
-    # # reorder cols
-    # first_cols = ["participant_id", "session", "trial_no", "condition"]
-    # df_pressure = df_pressure[first_cols+[c for c in df_pressure.columns if c not in first_cols]]
-    # save_pressure_data(df_pressure)
+    # # add a "matching" column for testing
+    #
+    # # df_pressure_trial_no["matching"] = df_pressure_trial_no.apply(lambda row: row.file_no == row.trial_no, axis=1)
+    # # df_pressure_trial_no.dropna(subset=["trial"], inplace=True)
+    #
+    # path_root = get_path_root()
+    # path_pressure_trial_no = path_root / "pressure" / "results_pressure_trial_no.xlsx"
+    # df_pressure_trial_no.to_excel(path_pressure_trial_no, index=False)
+    # # df_pressure.sort_values(by=['participant_id', 'session', 'trial_no'], inplace=True)
+    # # # reorder cols
+    # # first_cols = ["participant_id", "session", "trial_no", "condition"]
+    # # df_pressure = df_pressure[first_cols+[c for c in df_pressure.columns if c not in first_cols]]
+    # # save_pressure_data(df_pressure)
